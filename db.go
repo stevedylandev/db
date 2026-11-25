@@ -116,29 +116,42 @@ func cell(v any) string {
 	}
 }
 
-func readRows(db *sql.DB, table string, cols []col) ([][]string, error) {
+func readRows(db *sql.DB, table string, cols []col) ([][]string, []int64, error) {
+	hasRowid := !withoutRowid(db, table)
 	names := make([]string, len(cols))
 	for i, c := range cols {
 		names[i] = ident(c.name)
 	}
-	q := fmt.Sprintf("SELECT %s FROM %s LIMIT %d",
-		strings.Join(names, ", "), ident(table), readLimit)
+	sel := strings.Join(names, ", ")
+	if hasRowid {
+		sel = "rowid, " + sel
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s LIMIT %d", sel, ident(table), readLimit)
 
 	rows, err := db.Query(q)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	var out [][]string
+	var ids []int64
 	for rows.Next() {
 		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
+		if hasRowid {
+			vals = make([]any, len(cols)+1)
+		}
+		ptrs := make([]any, len(vals))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if hasRowid {
+			id, _ := vals[0].(int64)
+			ids = append(ids, id)
+			vals = vals[1:]
 		}
 		r := make([]string, len(cols))
 		for i, v := range vals {
@@ -146,7 +159,37 @@ func readRows(db *sql.DB, table string, cols []col) ([][]string, error) {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	return out, ids, rows.Err()
+}
+
+type rowKey struct {
+	where string
+	args  []any
+}
+
+func keyAt(cols []col, row []string, ids []int64, i int) (rowKey, error) {
+	if ids != nil {
+		if i >= len(ids) {
+			return rowKey{}, errors.New("cannot identify row")
+		}
+		return rowKey{where: "rowid = ?", args: []any{ids[i]}}, nil
+	}
+	var conds []string
+	var args []any
+	for j, c := range cols {
+		if c.pk == 0 {
+			continue
+		}
+		if j >= len(row) {
+			return rowKey{}, errors.New("cannot identify row")
+		}
+		conds = append(conds, ident(c.name)+" = ?")
+		args = append(args, coerce(c.ctype, row[j]))
+	}
+	if len(conds) == 0 {
+		return rowKey{}, errors.New("table has no primary key")
+	}
+	return rowKey{where: strings.Join(conds, " AND "), args: args}, nil
 }
 
 type insertPlan struct {
@@ -196,4 +239,39 @@ func insertRow(db *sql.DB, p insertPlan, values []string) (int64, error) {
 	}
 	id, _ := res.LastInsertId()
 	return id, nil
+}
+
+func updateRow(db *sql.DB, p insertPlan, values []string, key rowKey) (int64, error) {
+	var sets []string
+	var args []any
+	for i, c := range p.cols {
+		v := values[i]
+		if v == "" && c.dflt.Valid {
+			continue
+		}
+		sets = append(sets, ident(c.name)+" = ?")
+		args = append(args, coerce(c.ctype, v))
+	}
+	if len(sets) == 0 {
+		return 0, errors.New("nothing to update")
+	}
+
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
+		ident(p.table), strings.Join(sets, ", "), key.where)
+	res, err := db.Exec(q, append(args, key.args...)...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+func deleteRow(db *sql.DB, table string, key rowKey) (int64, error) {
+	q := fmt.Sprintf("DELETE FROM %s WHERE %s", ident(table), key.where)
+	res, err := db.Exec(q, key.args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

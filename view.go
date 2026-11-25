@@ -23,8 +23,12 @@ func (m model) View() tea.View {
 		b.WriteString(m.viewViewing())
 	case inserting:
 		b.WriteString(m.viewInserting())
+	case updating:
+		b.WriteString(m.viewUpdating())
 	case browsing:
 		b.WriteString(m.viewBrowsing())
+	case deleting:
+		b.WriteString(m.viewDeleting())
 	}
 	if m.err != nil {
 		b.WriteString("\nError: " + m.err.Error())
@@ -63,9 +67,9 @@ func (m model) viewViewing() string {
 	return b.String()
 }
 
-func (m model) viewInserting() string {
+func (m model) viewForm(title, action string) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Insert into "+m.table) + "\n\n")
+	b.WriteString(titleStyle.Render(title) + "\n\n")
 	for i, c := range m.plan.cols {
 		parts := []string{strings.ToLower(c.ctype)}
 		if c.pk != 0 {
@@ -81,11 +85,19 @@ func (m model) viewInserting() string {
 	if m.status != "" {
 		b.WriteString("\n" + m.status + "\n")
 	}
-	b.WriteString("\ntype to edit · enter: next/insert · up/down: fields · esc: cancel")
+	b.WriteString("\ntype to edit · enter: next/" + action + " · up/down: fields · esc: cancel")
 	return b.String()
 }
 
-func newInsertInputs(cols []col) []textinput.Model {
+func (m model) viewInserting() string {
+	return m.viewForm("Insert into "+m.table, "insert")
+}
+
+func (m model) viewUpdating() string {
+	return m.viewForm("Update row in "+m.table, "save")
+}
+
+func newInsertInputs(cols []col, values []string) []textinput.Model {
 	inputs := make([]textinput.Model, len(cols))
 	for i, c := range cols {
 		ti := textinput.New()
@@ -93,6 +105,9 @@ func newInsertInputs(cols []col) []textinput.Model {
 		ti.SetWidth(40)
 		if c.dflt.Valid && c.dflt.String != "" {
 			ti.Placeholder = c.dflt.String
+		}
+		if i < len(values) {
+			ti.SetValue(values[i])
 		}
 		inputs[i] = ti
 	}
@@ -108,7 +123,18 @@ func (m model) viewBrowsing() string {
 	if m.rowCount == readLimit {
 		note += fmt.Sprintf(" (first %d)", readLimit)
 	}
-	b.WriteString(note + " · i: insert · s: schema · esc: back · q: quit")
+	b.WriteString(note + " · i: insert · u: update · d: delete · s: schema · esc: back · q: quit")
+	return b.String()
+}
+
+func (m model) viewDeleting() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Rows: "+m.table) + "\n\n")
+	b.WriteString(baseStyle.Render(m.rowsTbl.View()) + "\n")
+	if m.status != "" {
+		b.WriteString("\n" + m.status + "\n")
+	}
+	b.WriteString("\ndelete this row? y: delete · esc/n: cancel")
 	return b.String()
 }
 

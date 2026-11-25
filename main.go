@@ -1,7 +1,4 @@
 // db - a simple TUI for managing sqlite databases
-//
-// Todo:
-// - Add Update and Delete methods
 package main
 
 import (
@@ -22,6 +19,8 @@ const (
 	viewing
 	inserting
 	browsing
+	updating
+	deleting
 )
 
 type model struct {
@@ -39,6 +38,8 @@ type model struct {
 	status   string
 	rowsTbl  table.Model
 	rowCount int
+	rowIds   []int64 // rowid of each displayed row; nil for WITHOUT ROWID tables
+	key      rowKey  // identifies the row being updated or deleted
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -46,7 +47,7 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if m.phase == inserting {
+		if m.phase == inserting || m.phase == updating {
 			var cmd tea.Cmd
 			m.inputs[m.field], cmd = m.inputs[m.field].Update(msg)
 			return m, cmd
@@ -68,8 +69,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, cmd, handled = m.updateViewing(key)
 	case inserting:
 		m, cmd, handled = m.updateInserting(key)
+	case updating:
+		m, cmd, handled = m.updateUpdating(key)
 	case browsing:
 		m, cmd, handled = m.updateBrowsing(key)
+	case deleting:
+		m, cmd, handled = m.updateDeleting(key)
 	}
 	if handled {
 		return m, cmd
@@ -79,12 +84,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) loadRows() error {
-	rows, err := readRows(m.db, m.table, m.cols)
+	rows, ids, err := readRows(m.db, m.table, m.cols)
 	if err != nil {
 		return err
 	}
 	m.rowsTbl = newRowsTable(m.cols, rows)
 	m.rowCount = len(rows)
+	m.rowIds = ids
 	return nil
 }
 
