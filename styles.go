@@ -12,6 +12,10 @@ var (
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("4"))
 
+	formLabelStyle = lipgloss.NewStyle().Bold(true)
+	formHintStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	formInputStyle = lipgloss.NewStyle().MarginLeft(2)
+
 	tableHeaderStyle = table.DefaultStyles().Header.
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderForeground(lipgloss.Color("240")).

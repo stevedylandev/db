@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
 const (
-	maxCellWidth = 24
+	maxCellWidth   = 24
 	maxVisibleRows = 15
 )
 
@@ -66,24 +67,36 @@ func (m model) viewInserting() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Insert into "+m.table) + "\n\n")
 	for i, c := range m.plan.cols {
-		hint := strings.ToLower(c.ctype)
+		parts := []string{strings.ToLower(c.ctype)}
 		if c.pk != 0 {
-			hint += ", pk"
+			parts = append(parts, "pk")
 		}
 		if c.dflt.Valid {
-			hint += fmt.Sprintf(", default %s (empty = default)", c.dflt.String)
+			parts = append(parts, fmt.Sprintf("default %s (empty = default)", c.dflt.String))
 		}
-		cursor, val := "  ", m.vals[i]
-		if i == m.field {
-			cursor, val = "> ", selStyle.Render(m.vals[i]+"▌")
-		}
-		b.WriteString(fmt.Sprintf("%s%-20s %-30s %s\n", cursor, c.name, hint, val))
+		b.WriteString("  " + formLabelStyle.Render(c.name))
+		b.WriteString("  " + formHintStyle.Render("("+strings.Join(parts, " · ")+")") + "\n")
+		b.WriteString(formInputStyle.Render(m.inputs[i].View()) + "\n\n")
 	}
 	if m.status != "" {
 		b.WriteString("\n" + m.status + "\n")
 	}
-	b.WriteString("\ntype to edit · enter: next/insert · esc: cancel")
+	b.WriteString("\ntype to edit · enter: next/insert · up/down: fields · esc: cancel")
 	return b.String()
+}
+
+func newInsertInputs(cols []col) []textinput.Model {
+	inputs := make([]textinput.Model, len(cols))
+	for i, c := range cols {
+		ti := textinput.New()
+		ti.Prompt = ""
+		ti.SetWidth(40)
+		if c.dflt.Valid && c.dflt.String != "" {
+			ti.Placeholder = c.dflt.String
+		}
+		inputs[i] = ti
+	}
+	return inputs
 }
 
 func (m model) viewBrowsing() string {

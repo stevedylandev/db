@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	_ "modernc.org/sqlite"
 )
@@ -33,7 +34,7 @@ type model struct {
 	err    error
 
 	plan     insertPlan
-	vals     []string
+	inputs   []textinput.Model
 	field    int
 	status   string
 	rowsTbl  table.Model
@@ -45,6 +46,11 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
+		if m.phase == inserting {
+			var cmd tea.Cmd
+			m.inputs[m.field], cmd = m.inputs[m.field].Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	}
 	if key.String() == "ctrl+c" {
