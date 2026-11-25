@@ -17,6 +17,7 @@ type col struct {
 	notNull int
 	dflt    sql.NullString
 	hidden  int
+	enum    []string // allowed values from a CHECK(col IN (...)) constraint, if any
 }
 
 const readLimit = 1000
@@ -198,6 +199,27 @@ type insertPlan struct {
 	autoPk string
 }
 
+func enumValues(ddl, name string) []string {
+	marker := name + " IN ("
+	i := strings.Index(ddl, " "+marker)
+	if i < 0 {
+		i = strings.Index(ddl, "("+marker) 
+	}
+	if i < 0 {
+		return nil
+	}
+	rest := ddl[i+1+len(marker):]
+	end := strings.IndexByte(rest, ')')
+	if end < 1 {
+		return nil
+	}
+	var vals []string
+	for _, v := range strings.Split(rest[:end], ",") {
+		vals = append(vals, strings.Trim(strings.TrimSpace(v), "'"))
+	}
+	return vals
+}
+
 func planInsert(db *sql.DB, table string, cols []col) insertPlan {
 	p := insertPlan{table: table}
 	if !withoutRowid(db, table) {
@@ -211,6 +233,12 @@ func planInsert(db *sql.DB, table string, cols []col) insertPlan {
 			continue
 		}
 		p.cols = append(p.cols, c)
+	}
+	var ddl sql.NullString
+	if err := db.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='table' AND name=?`, table).Scan(&ddl); err == nil && ddl.Valid {
+		for i := range p.cols {
+			p.cols[i].enum = enumValues(ddl.String, p.cols[i].name)
+		}
 	}
 	return p
 }

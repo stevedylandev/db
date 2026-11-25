@@ -75,7 +75,9 @@ func (m model) viewForm(title, action string) string {
 		if c.pk != 0 {
 			parts = append(parts, "pk")
 		}
-		if c.dflt.Valid {
+		if len(c.enum) > 0 {
+			parts = append(parts, "one of: "+strings.Join(c.enum, " / "))
+		} else if c.dflt.Valid {
 			parts = append(parts, fmt.Sprintf("default %s (empty = default)", c.dflt.String))
 		}
 		b.WriteString("  " + formLabelStyle.Render(c.name))
