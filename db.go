@@ -19,6 +19,8 @@ type col struct {
 	hidden  int
 }
 
+const readLimit = 1000
+
 func ident(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
@@ -101,10 +103,56 @@ func singleIntPk(cols []col) (string, bool) {
 	return "", false
 }
 
+func cell(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case []byte:
+		return string(t)
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+func readRows(db *sql.DB, table string, cols []col) ([][]string, error) {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = ident(c.name)
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s LIMIT %d",
+		strings.Join(names, ", "), ident(table), readLimit)
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out [][]string
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		r := make([]string, len(cols))
+		for i, v := range vals {
+			r[i] = cell(v)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 type insertPlan struct {
 	table  string
-	cols   []col  
-	autoPk string 
+	cols   []col
+	autoPk string
 }
 
 func planInsert(db *sql.DB, table string, cols []col) insertPlan {
@@ -114,10 +162,10 @@ func planInsert(db *sql.DB, table string, cols []col) insertPlan {
 	}
 	for _, c := range cols {
 		if c.hidden != 0 {
-			continue 
+			continue
 		}
 		if p.autoPk != "" && c.name == p.autoPk {
-			continue 
+			continue
 		}
 		p.cols = append(p.cols, c)
 	}
