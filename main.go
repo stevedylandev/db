@@ -1,182 +1,201 @@
-//
 // db - a simple TUI for managing sqlite databases
 //
-// Todo: 
+// Todo:
 // - Migrate to Bubbletea
-// - Add Update and Delete methods 
-// - Add Read methods? 
-//
+// - Add Update and Delete methods
+// - Add Read methods?
 package main
 
 import (
-	"bufio"
 	"database/sql"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	_ "modernc.org/sqlite"
 )
 
-var in = bufio.NewScanner(os.Stdin)
+var (
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3"))
+	selStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
+)
 
-type col struct {
-	name    string
-	ctype   string
-	pk      int
-	notNull int
-	dflt    sql.NullString
-	hidden  int
+type phase int
+
+const (
+	choosing phase = iota
+	viewing
+	inserting
+)
+
+type model struct {
+	db     *sql.DB
+	phase  phase
+	tables []string
+	cursor int
+	table  string
+	cols   []col
+	err    error
+
+	plan   insertPlan 
+	vals   []string
+	field  int
+	status string
 }
 
-func ask(prompt string) string {
-	fmt.Print(prompt)
-	if !in.Scan() {
-		fmt.Println()
-		os.Exit(0)
+func (m model) Init() tea.Cmd { return nil }
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg: 
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		switch m.phase {
+		case choosing:
+			switch msg.String() {
+			case "q":
+				return m, tea.Quit
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "down", "j":
+				if m.cursor < len(m.tables)-1 {
+					m.cursor++
+				}
+			case "enter":
+				m.table = m.tables[m.cursor]
+				cols, err := tableColumns(m.db, m.table)
+				if err != nil {
+					m.err = err
+					return m, tea.Quit
+				}
+				m.cols = cols
+				m.status = ""
+				m.phase = viewing
+			}
+
+		case viewing:
+			switch msg.String() {
+			case "q":
+				return m, tea.Quit
+			case "enter":
+				m.phase = choosing 
+			case "i":
+				m.plan = planInsert(m.db, m.table, m.cols)
+				if len(m.plan.cols) == 0 {
+					m.status = "nothing to insert"
+					return m, nil
+				}
+				m.vals = make([]string, len(m.plan.cols))
+				m.field = 0
+				m.status = ""
+				m.phase = inserting
+			}
+
+		case inserting:
+			switch s := msg.String(); s {
+			case "esc":
+				m.status = ""
+				m.phase = viewing
+			case "enter":
+				if m.field < len(m.plan.cols)-1 {
+					m.field++
+					return m, nil
+				}
+				id, err := insertRow(m.db, m.plan, m.vals)
+				if err != nil {
+					m.status = "insert: " + err.Error()
+					return m, nil 
+				}
+				m.status = "1 row inserted"
+				if m.plan.autoPk != "" {
+					m.status += fmt.Sprintf(" (%s = %d)", m.plan.autoPk, id)
+				}
+				m.phase = viewing
+			case "backspace":
+				if r := []rune(m.vals[m.field]); len(r) > 0 {
+					m.vals[m.field] = string(r[:len(r)-1])
+				}
+			case "space":
+				m.vals[m.field] += " "
+			default:
+				if utf8.RuneCountInString(s) == 1 {
+					m.vals[m.field] += s
+				}
+			}
+		}
 	}
-	return strings.TrimSpace(in.Text())
+	return m, nil
 }
 
-func ident(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
+func (m model) View() tea.View {
+	var b strings.Builder
 
-func coerce(ctype, v string) any {
-	t := strings.ToUpper(ctype)
-	switch {
-	case strings.Contains(t, "INT"):
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
+	switch m.phase {
+	case choosing:
+		b.WriteString(titleStyle.Render("Select a table") + "\n\n")
+		for i, t := range m.tables {
+			cursor, line := "  ", t
+			if i == m.cursor {
+				cursor, line = "> ", selStyle.Render(t)
+			}
+			b.WriteString(cursor + line + "\n")
 		}
-	case strings.Contains(t, "REAL"), strings.Contains(t, "FLOA"), strings.Contains(t, "DOUB"):
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return v
-}
+		b.WriteString("\nup/down: move · enter: select · q: quit")
 
-func listTables(db *sql.DB) ([]string, error) {
-	rows, err := db.Query(`SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var next string
-		if err := rows.Scan(&next); err != nil {
-			return nil, err
+	case viewing:
+		b.WriteString(titleStyle.Render("Schema: "+m.table) + "\n\n")
+		for _, c := range m.cols {
+			pk := ""
+			if c.pk == 1 {
+				pk = " (pk)"
+			}
+			b.WriteString(fmt.Sprintf("  %-20s %s%s\n", c.name, strings.ToLower(c.ctype), pk))
 		}
-		out = append(out, next)
-	}
-	return out, rows.Err()
-}
-
-func tableColumns(db *sql.DB, table string) ([]col, error) {
-	rows, err := db.Query("PRAGMA table_xinfo(" + ident(table) + ")")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []col
-	for rows.Next() {
-		var cid int
-		var c col
-		if err := rows.Scan(&cid, &c.name, &c.ctype, &c.notNull, &c.dflt, &c.pk, &c.hidden); err != nil {
-			return nil, err
+		if m.status != "" {
+			b.WriteString("\n" + m.status + "\n")
 		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
+		b.WriteString("\ni: insert · enter: back · q: quit")
 
-func withoutRowid(db *sql.DB, table string) bool {
-	var s sql.NullString
-	if err := db.QueryRow(`SELECT sql FROM sqlite_schema WHERE type='table' AND name=?`, table).Scan(&s); err != nil || !s.Valid {
-		return false
-	}
-	return strings.Contains(strings.ToUpper(s.String), "WITHOUT ROWID")
-}
-
-func singleIntPk(cols []col) (string, bool) {
-	name := ""
-	count := 0
-	for _, c := range cols {
-		if c.pk != 0 {
-			count++
-			name = c.name
+	case inserting:
+		b.WriteString(titleStyle.Render("Insert into "+m.table) + "\n\n")
+		for i, c := range m.plan.cols {
+			hint := strings.ToLower(c.ctype)
+			if c.pk != 0 {
+				hint += ", pk"
+			}
+			if c.dflt.Valid {
+				hint += fmt.Sprintf(", default %s (empty = default)", c.dflt.String)
+			}
+			cursor, val := "  ", m.vals[i]
+			if i == m.field {
+				cursor, val = "> ", selStyle.Render(m.vals[i]+"▌")
+			}
+			b.WriteString(fmt.Sprintf("%s%-20s %-30s %s\n", cursor, c.name, hint, val))
 		}
-	}
-	if count != 1 {
-		return "", false
-	}
-	for _, c := range cols {
-		if c.name == name && strings.EqualFold(strings.TrimSpace(c.ctype), "INTEGER") {
-			return name, true
+		if m.status != "" {
+			b.WriteString("\n" + m.status + "\n")
 		}
-	}
-	return "", false
-}
-
-func doInsert(db *sql.DB, table string, cols []col) {
-	autoPk, hasAutoPk := "", false
-	if !withoutRowid(db, table) {
-		autoPk, hasAutoPk = singleIntPk(cols)
+		b.WriteString("\ntype to edit · enter: next/insert · esc: cancel")
 	}
 
-	var names, ph []string
-	var args []any
-	for _, c := range cols {
-		if c.hidden != 0 { 
-			fmt.Printf("  %s: skipped (generated)\n", c.name)
-			continue
-		}
-		if hasAutoPk && c.name == autoPk {
-			fmt.Printf("  %s: auto (INTEGER PRIMARY KEY)\n", c.name)
-			continue
-		}
-		hint := strings.ToLower(c.ctype)
-		if c.pk != 0 {
-			hint += ", pk"
-		}
-		if c.dflt.Valid {
-			hint += ", default " + c.dflt.String + " (enter = default)"
-		}
-		v := ask(fmt.Sprintf("  %s [%s]: ", c.name, hint))
-		if v == "" && c.dflt.Valid {
-			continue 
-		}
-		names = append(names, ident(c.name))
-		ph = append(ph, "?")
-		args = append(args, coerce(c.ctype, v))
+	if m.err != nil {
+		b.WriteString("\nError: " + m.err.Error())
 	}
-	if len(names) == 0 {
-		fmt.Println("  nothing to insert")
-		return
-	}
-
-	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-		ident(table), strings.Join(names, ", "), strings.Join(ph, ", "))
-	res, err := db.Exec(q, args...)
-	if err != nil {
-		fmt.Println("  err:", err)
-		return
-	}
-	n, _ := res.RowsAffected()
-	fmt.Printf("  %d row inserted\n", n)
-	if hasAutoPk {
-		if id, err := res.LastInsertId(); err == nil {
-			fmt.Printf("  %s = %d\n", autoPk, id)
-		}
-	}
+	return tea.NewView(b.String())
 }
 
 func main() {
-	dbPath := os.Args[1]
-	db, err := sql.Open("sqlite", dbPath)
+	if len(os.Args) < 2 {
+		fmt.Println("usage: db <database file>")
+		os.Exit(1)
+	}
+	db, err := sql.Open("sqlite", os.Args[1])
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -188,21 +207,10 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(tables)
-	table := ask("Which table do you want to see? ")
-	cols, err := tableColumns(db, table)
-	if err != nil {
+
+	p := tea.NewProgram(model{db: db, tables: tables})
+	if _, err := p.Run(); err != nil {
 		fmt.Println(err)
-		return
+		os.Exit(1)
 	}
-	fmt.Println("\nSchema of " + table + ":")
-	for _, c := range cols {
-		pk := ""
-		if c.pk == 1 {
-			pk = " (pk)"
-		}
-		fmt.Printf("  %s %s%s\n", c.name, strings.ToLower(c.ctype), pk)
-	}
-	fmt.Println()
-	doInsert(db, table, cols)
 }
