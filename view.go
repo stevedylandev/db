@@ -23,8 +23,8 @@ func (m model) View() tea.View {
 	switch m.phase {
 	case choosing:
 		b.WriteString(m.viewChoosing())
-	case viewing:
-		b.WriteString(m.viewViewing())
+	case schema:
+		b.WriteString(m.viewSchema())
 	case inserting:
 		b.WriteString(m.viewInserting())
 	case updating:
@@ -54,7 +54,7 @@ func (m model) viewChoosing() string {
 	return b.String()
 }
 
-func (m model) viewViewing() string {
+func (m model) viewSchema() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Schema: "+m.table) + "\n\n")
 	for _, c := range m.cols {

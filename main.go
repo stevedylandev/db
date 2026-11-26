@@ -16,7 +16,7 @@ type phase int
 
 const (
 	choosing phase = iota
-	viewing
+	schema
 	inserting
 	browsing
 	updating
@@ -74,8 +74,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.phase {
 	case choosing:
 		m, cmd, handled = m.updateChoosing(key)
-	case viewing:
-		m, cmd, handled = m.updateViewing(key)
+	case schema:
+		m, cmd, handled = m.updateSchema(key)
 	case inserting:
 		m, cmd, handled = m.updateInserting(key)
 	case updating:

@@ -37,7 +37,7 @@ func (m model) updateChoosing(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m model) updateViewing(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
+func (m model) updateSchema(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
 	switch key.String() {
 	case "q":
 		return m, tea.Quit, true
@@ -179,7 +179,7 @@ func (m model) updateBrowsing(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
 		m.phase = deleting
 		return m, nil, true
 	case "s":
-		m.phase = viewing
+		m.phase = schema
 		return m, nil, true
 	case "left", "h":
 		if m.colOffset > 0 {
