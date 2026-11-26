@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	maxCellWidth   = 24
-	maxVisibleRows = 15
-	cellPadding = 2
-	roomAroundTable = 4
+	maxCellWidth      = 24
+	maxVisibleRows    = 15
+	cellPadding       = 2
+	roomAroundTable   = 4
 	defaultTableWidth = 80
-	minTableWidth = 20
+	minTableWidth     = 20
 )
 
 func (m model) View() tea.View {
@@ -50,7 +50,7 @@ func (m model) viewChoosing() string {
 		}
 		b.WriteString(cursor + line + "\n")
 	}
-	b.WriteString("\nup/down (k/j): move · enter: select · q: quit")
+	b.WriteString("\n" + m.help.ShortHelpView(choosingHelp()))
 	return b.String()
 }
 
@@ -67,7 +67,7 @@ func (m model) viewSchema() string {
 	if m.status != "" {
 		b.WriteString("\n" + m.status + "\n")
 	}
-	b.WriteString("\nesc/enter: back · q: quit")
+	b.WriteString("\n" + m.help.ShortHelpView(schemaHelp()))
 	return b.String()
 }
 
@@ -91,7 +91,7 @@ func (m model) viewForm(title, action string) string {
 	if m.status != "" {
 		b.WriteString("\n" + m.status + "\n")
 	}
-	b.WriteString("\ntype to edit · enter: next/" + action + " · up/down: fields · esc: cancel")
+	b.WriteString("\n" + m.help.ShortHelpView(formHelp(action)))
 	return b.String()
 }
 
@@ -122,14 +122,14 @@ func newInsertInputs(cols []col, values []string) []textinput.Model {
 
 func (m model) viewBrowsing() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Rows: "+m.table) + "\n\n")
-	b.WriteString(baseStyle.Render(m.rowsTbl.View()) + "\n")
-	b.WriteString("  " + m.rowsTbl.HelpView() + "\n")
-	note := fmt.Sprintf("  %d rows", m.rowCount)
+	title := "Rows: " + m.table
+	note := fmt.Sprintf("%d rows", m.rowCount)
 	if m.rowCount == readLimit {
 		note += fmt.Sprintf(" (first %d)", readLimit)
 	}
-	b.WriteString(" i: insert · u: update · d: delete · s: schema · esc: back · q: quit")
+	b.WriteString(titleStyle.Render(title+" ("+note+")") + "\n\n")
+	b.WriteString(baseStyle.Render(m.rowsTbl.View()) + "\n")
+	b.WriteString("  " + m.help.ShortHelpView(browsingHelp(m.rowsTbl.KeyMap)) + "\n")
 	return b.String()
 }
 
@@ -140,7 +140,7 @@ func (m model) viewDeleting() string {
 	if m.status != "" {
 		b.WriteString("\n" + m.status + "\n")
 	}
-	b.WriteString("\ndelete this row? y: delete · esc/n: cancel")
+	b.WriteString("\ndelete this row? " + m.help.ShortHelpView(confirmHelp()))
 	return b.String()
 }
 
@@ -160,6 +160,7 @@ func newRowsTable(cols []col, data [][]string, termW, termH, colOffset int) tabl
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithRows(rows),
+		table.WithKeyMap(browsingKeyMap()),
 		table.WithFocused(true),
 		table.WithHeight(visibleHeight(len(rows), termH)),
 		table.WithWidth(avail),

@@ -17,7 +17,7 @@ type col struct {
 	notNull int
 	dflt    sql.NullString
 	hidden  int
-	enum    []string // allowed values from a CHECK(col IN (...)) constraint, if any
+	enum    []string 
 }
 
 const readLimit = 1000
@@ -203,7 +203,7 @@ func enumValues(ddl, name string) []string {
 	marker := name + " IN ("
 	i := strings.Index(ddl, " "+marker)
 	if i < 0 {
-		i = strings.Index(ddl, "("+marker) 
+		i = strings.Index(ddl, "("+marker)
 	}
 	if i < 0 {
 		return nil

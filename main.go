@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -24,24 +25,25 @@ const (
 )
 
 type model struct {
-	db     *sql.DB
-	phase  phase
-	tables []string
-	cursor int
-	table  string
-	cols   []col
-	err    error
-	width  int
-	height int
-	plan     insertPlan
-	inputs   []textinput.Model
-	field    int
-	status   string
-	rowsTbl  table.Model
-	rowCount int
-	rowIds   []int64
-	key      rowKey
+	db        *sql.DB
+	phase     phase
+	tables    []string
+	cursor    int
+	table     string
+	cols      []col
+	err       error
+	width     int
+	height    int
+	plan      insertPlan
+	inputs    []textinput.Model
+	field     int
+	status    string
+	rowsTbl   table.Model
+	rowCount  int
+	rowIds    []int64
+	key       rowKey
 	colOffset int
+	help      help.Model
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -49,6 +51,7 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = size.Width, size.Height
+		m.help.SetWidth(size.Width)
 		if m.phase == browsing || m.phase == deleting {
 			m.refitRowsTable()
 		}
@@ -121,7 +124,7 @@ func main() {
 		return
 	}
 
-	p := tea.NewProgram(model{db: db, tables: tables})
+	p := tea.NewProgram(model{db: db, tables: tables, help: help.New()})
 	if _, err := p.Run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
