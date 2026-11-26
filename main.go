@@ -31,20 +31,29 @@ type model struct {
 	table  string
 	cols   []col
 	err    error
-
+	width  int
+	height int
 	plan     insertPlan
 	inputs   []textinput.Model
 	field    int
 	status   string
 	rowsTbl  table.Model
 	rowCount int
-	rowIds   []int64 // rowid of each displayed row; nil for WITHOUT ROWID tables
-	key      rowKey  // identifies the row being updated or deleted
+	rowIds   []int64
+	key      rowKey
+	colOffset int
 }
 
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = size.Width, size.Height
+		if m.phase == browsing || m.phase == deleting {
+			m.refitRowsTable()
+		}
+		return m, nil
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		if m.phase == inserting || m.phase == updating {
@@ -88,7 +97,7 @@ func (m *model) loadRows() error {
 	if err != nil {
 		return err
 	}
-	m.rowsTbl = newRowsTable(m.cols, rows)
+	m.rowsTbl = newRowsTable(m.cols, rows, m.width, m.height, m.colOffset)
 	m.rowCount = len(rows)
 	m.rowIds = ids
 	return nil

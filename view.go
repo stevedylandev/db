@@ -12,6 +12,10 @@ import (
 const (
 	maxCellWidth   = 24
 	maxVisibleRows = 15
+	cellPadding = 2
+	roomAroundTable = 4
+	defaultTableWidth = 80
+	minTableWidth = 20
 )
 
 func (m model) View() tea.View {
@@ -125,7 +129,7 @@ func (m model) viewBrowsing() string {
 	if m.rowCount == readLimit {
 		note += fmt.Sprintf(" (first %d)", readLimit)
 	}
-	b.WriteString(note + " · i: insert · u: update · d: delete · s: schema · esc: back · q: quit")
+	b.WriteString(" i: insert · u: update · d: delete · s: schema · esc: back · q: quit")
 	return b.String()
 }
 
@@ -140,36 +144,25 @@ func (m model) viewDeleting() string {
 	return b.String()
 }
 
-func newRowsTable(cols []col, data [][]string) table.Model {
-	widths := make([]int, len(cols))
-	for i, c := range cols {
-		widths[i] = len(c.name)
-	}
-	for _, r := range data {
-		for i, v := range r {
-			if i < len(widths) && len(v) > widths[i] {
-				widths[i] = min(len(v), maxCellWidth)
-			}
-		}
-	}
-
+func newRowsTable(cols []col, data [][]string, termW, termH, colOffset int) table.Model {
 	columns := make([]table.Column, len(cols))
-	total := 0
 	for i, c := range cols {
-		columns[i] = table.Column{Title: c.name, Width: widths[i]}
-		total += widths[i]
+		columns[i] = table.Column{Title: c.name}
 	}
 	rows := make([]table.Row, len(data))
 	for i, r := range data {
 		rows[i] = table.Row(r)
 	}
 
+	avail := tableAvailWidth(termW)
+	columns = fitColumns(columns, rows, avail, colOffset)
+
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithFocused(true),
-		table.WithHeight(min(max(len(rows), 1), maxVisibleRows)+2),
-		table.WithWidth(total+2*len(cols)+2),
+		table.WithHeight(visibleHeight(len(rows), termH)),
+		table.WithWidth(avail),
 	)
 
 	s := table.DefaultStyles()
@@ -177,4 +170,86 @@ func newRowsTable(cols []col, data [][]string) table.Model {
 	s.Selected = tableSelectedStyle
 	t.SetStyles(s)
 	return t
+}
+
+func (m *model) refitRowsTable() {
+	cols := m.rowsTbl.Columns()
+	rows := m.rowsTbl.Rows()
+	if len(cols) == 0 {
+		return
+	}
+	avail := tableAvailWidth(m.width)
+	m.rowsTbl.SetColumns(fitColumns(cols, rows, avail, m.colOffset))
+	m.rowsTbl.SetWidth(avail)
+	m.rowsTbl.SetHeight(visibleHeight(len(rows), m.height))
+}
+
+func (m model) columnWindow() (first, last int, ok bool) {
+	cols := m.rowsTbl.Columns()
+	first, last = -1, -1
+	for i, c := range cols {
+		if c.Width > 0 {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	return first, last, first >= 0
+}
+
+func tableAvailWidth(termW int) int {
+	if termW <= 0 {
+		return defaultTableWidth
+	}
+	return max(termW-roomAroundTable, minTableWidth)
+}
+
+func fitColumns(cols []table.Column, rows []table.Row, avail, first int) []table.Column {
+	n := len(cols)
+	if n == 0 {
+		return cols
+	}
+	first = min(max(first, 0), n-1)
+	natural := naturalWidths(cols, rows)
+	total := 0
+	for i := range cols {
+		switch {
+		case i < first:
+			cols[i].Width = 0
+		case i == first || total+natural[i]+cellPadding <= avail:
+			cols[i].Width = natural[i]
+			total += natural[i] + cellPadding
+		default:
+			cols[i].Width = 0
+		}
+	}
+	if natural[first]+cellPadding > avail {
+		cols[first].Width = max(avail-cellPadding, 1)
+	}
+	return cols
+}
+
+func naturalWidths(cols []table.Column, rows []table.Row) []int {
+	n := len(cols)
+	natural := make([]int, n)
+	for i := range cols {
+		natural[i] = max(len(cols[i].Title), 1)
+	}
+	for _, r := range rows {
+		for i, v := range r {
+			if i < n {
+				natural[i] = max(natural[i], min(len(v), maxCellWidth))
+			}
+		}
+	}
+	return natural
+}
+
+func visibleHeight(n, termH int) int {
+	visible := min(max(n, 1), maxVisibleRows)
+	if termH > 0 {
+		visible = min(visible, max(termH-8, 1))
+	}
+	return visible + 2
 }

@@ -20,6 +20,7 @@ func (m model) updateChoosing(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
 		}
 	case "enter":
 		m.table = m.tables[m.cursor]
+		m.colOffset = 0
 		cols, err := tableColumns(m.db, m.table)
 		if err != nil {
 			m.err = err
@@ -179,6 +180,19 @@ func (m model) updateBrowsing(key tea.KeyPressMsg) (model, tea.Cmd, bool) {
 		return m, nil, true
 	case "s":
 		m.phase = viewing
+		return m, nil, true
+	case "left", "h":
+		if m.colOffset > 0 {
+			m.colOffset--
+			m.refitRowsTable()
+		}
+		return m, nil, true
+	case "right", "l":
+		// only scroll if there are hidden columns to the right
+		if _, last, ok := m.columnWindow(); ok && last < len(m.cols)-1 {
+			m.colOffset++
+			m.refitRowsTable()
+		}
 		return m, nil, true
 	}
 	return m, nil, false
